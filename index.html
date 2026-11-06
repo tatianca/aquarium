@@ -1,0 +1,890 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Аквариум любви</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#04384a;font-family:"Segoe UI",system-ui,sans-serif;color:#eafcff}
+  canvas{display:block;width:100vw;height:100vh}
+  #panel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:calc(100% - 32px);max-width:440px;box-sizing:border-box;
+    padding:22px 26px;border-radius:20px;background:rgba(3,48,66,.78);backdrop-filter:blur(10px);
+    border:1px solid rgba(150,240,255,.35);box-shadow:0 12px 40px rgba(0,0,0,.35);text-align:center}
+  #panel h1{margin:0 0 6px;font-size:24px}
+  #panel p{margin:6px 0 12px;font-size:14px;line-height:1.45;opacity:.92}
+  #panel b{color:#ffd27a}
+  button{display:block;width:100%;margin:8px 0;padding:12px;border:0;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;
+    background:linear-gradient(135deg,#ffc94a,#ff7b1c);color:#3d1700;transition:transform .15s}
+  button:hover{transform:scale(1.02)}
+  button.sec{background:rgba(255,255,255,.13);color:#eafcff}
+  #hud{position:fixed;right:14px;bottom:14px;display:none;gap:8px;align-items:center}
+  #hud button{width:auto;margin:0;padding:8px 12px;font-size:14px;background:rgba(0,0,0,.3);color:#fff}
+  #info{font-size:13px;padding:7px 12px;border-radius:12px;background:rgba(0,0,0,.3);display:flex;gap:8px;align-items:center}
+  #dot{width:12px;height:12px;border-radius:50%;background:#ff5a8a}
+  #status{font-size:13px;opacity:.85;min-height:18px}
+  input[type=file]{display:none}
+  #mode{position:fixed;left:14px;top:14px;font-size:14px;padding:7px 12px;border-radius:12px;background:rgba(0,0,0,.3);pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="mode">🔇 Звук не подключён · версия 16</div>
+
+<div id="panel">
+  <h1>🐠 Аквариум любви 🐠</h1>
+  <p>Нажмите <b>«Слушать через микрофон»</b> и разрешите доступ. Включите музыку погромче — рыбки начнут целоваться. В тишине и при обычном шуме они просто подплывают и отплывают.</p>
+  <button id="bMic">🎤 Слушать через микрофон</button>
+  <button id="bTab" class="sec">🎵 Звук из вкладки Chrome</button>
+  <button id="bFile" class="sec">📁 Свой аудиофайл</button>
+  <button id="bDemo" class="sec">▶ Демо без звука</button>
+  <input type="file" id="file" accept="audio/*">
+  <p style="font-size:12px;opacity:.7;margin-top:10px">Рыбки опаздывают или спешат? Подстройте клавишами ← →</p>
+  <div id="status"></div>
+</div>
+<div id="hud">
+  <div id="info"><span id="dot"></span><span id="bpm">— BPM</span></div>
+  <button id="hMenu">🎵 Источник звука</button><button id="hFull">⛶ Весь экран</button>
+</div>
+
+<script>
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const TAU = Math.PI * 2;
+const rand = (a, b) => a + Math.random() * (b - a);
+const lerp = (a, b, k) => a + (b - a) * k;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+let W, H, S, baseS, sandCv, glassCv, weeds = [], corals = [], bubbles = [], bubblers = [];
+
+/* ---------------- Сцена ---------------- */
+function resize() {
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  W = Math.max(innerWidth, 2); H = Math.max(innerHeight, 2);
+  cv.width = W * dpr; cv.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  baseS = Math.min(W * 0.17, H * 0.26); S = baseS; // размер главной пары; остальные — доля от него
+  buildSand(dpr); buildGlass(dpr); buildDecor();
+}
+addEventListener('resize', resize);
+
+function sandTop(x) { return H * 0.84 + Math.sin(x * 0.006) * H * 0.02 + Math.sin(x * 0.017 + 1) * H * 0.008; }
+
+function buildSand(dpr) {
+  sandCv = document.createElement('canvas');
+  sandCv.width = W * dpr; sandCv.height = H * dpr;
+  const c = sandCv.getContext('2d'); c.scale(dpr, dpr);
+  c.beginPath(); c.moveTo(0, H);
+  for (let x = 0; x <= W; x += 8) c.lineTo(x, sandTop(x));
+  c.lineTo(W, H); c.closePath();
+  const g = c.createLinearGradient(0, H * 0.8, 0, H);
+  g.addColorStop(0, '#f3dca0'); g.addColorStop(1, '#c9a160');
+  c.fillStyle = g; c.fill();
+  // песчинки
+  for (let i = 0; i < W * 0.6; i++) {
+    const x = rand(0, W), y = rand(sandTop(x) + 3, H);
+    c.fillStyle = `rgba(${Math.random() < .5 ? '120,90,40' : '255,250,220'},${rand(.15, .4)})`;
+    c.fillRect(x, y, 1.5, 1.5);
+  }
+  // камушки
+  const cols = ['#8fb5c9', '#e58a6b', '#f2f0e6', '#6d8c74', '#b9a3d6', '#e9c46a'];
+  for (let i = 0; i < W / 14; i++) {
+    const x = rand(0, W), y = rand(sandTop(x) + 6, H - 4), r = rand(4, 11);
+    c.fillStyle = cols[i % cols.length];
+    c.beginPath(); c.ellipse(x, y, r, r * 0.7, rand(-.4, .4), 0, TAU); c.fill();
+    c.fillStyle = 'rgba(255,255,255,.35)';
+    c.beginPath(); c.ellipse(x - r * .3, y - r * .25, r * .35, r * .2, 0, 0, TAU); c.fill();
+  }
+}
+
+function buildGlass(dpr) {
+  glassCv = document.createElement('canvas');
+  glassCv.width = W * dpr; glassCv.height = H * dpr;
+  const c = glassCv.getContext('2d'); c.scale(dpr, dpr);
+  // затемнение по краям
+  const v = c.createRadialGradient(W / 2, H / 2, Math.min(W, H) * .35, W / 2, H / 2, Math.max(W, H) * .75);
+  v.addColorStop(0, 'rgba(0,20,30,0)'); v.addColorStop(1, 'rgba(0,20,30,.55)');
+  c.fillStyle = v; c.fillRect(0, 0, W, H);
+  // блики на стекле
+  const strip = (x, w, a) => {
+    const g = c.createLinearGradient(x, 0, x + w, 0);
+    g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(.5, `rgba(255,255,255,${a})`); g.addColorStop(1, 'rgba(255,255,255,0)');
+    c.fillStyle = g;
+    c.beginPath(); c.moveTo(x, 0); c.lineTo(x + w, 0); c.lineTo(x + w - W * .08, H); c.lineTo(x - W * .08, H); c.fill();
+  };
+  strip(W * .08, W * .07, .10); strip(W * .17, W * .02, .12); strip(W * .86, W * .05, .06);
+  // кромка стекла
+  c.strokeStyle = 'rgba(200,250,255,.18)'; c.lineWidth = 6; c.strokeRect(3, 3, W - 6, H - 6);
+}
+
+function buildDecor() {
+  weeds = []; corals = [];
+  const n = Math.max(6, Math.round(W / 110));
+  for (let i = 0; i < n; i++) {
+    const x = (i + rand(.1, .9)) * W / n;
+    weeds.push({ x, h: rand(H * .22, H * .5), w: rand(9, 18), ph: rand(0, TAU), hue: rand(95, 150), front: Math.random() < .3, segs: 14 });
+  }
+  const cc = ['#ff6f91', '#ff9671', '#c86bfa', '#ffc75f', '#f95d6a'];
+  for (let i = 0; i < Math.max(4, W / 260); i++) {
+    corals.push({ x: rand(W * .04, W * .96), size: rand(.5, 1), col: cc[i % cc.length], seed: Math.random() * 1000, type: i % 2 });
+  }
+  bubblers = [{ x: W * rand(.1, .25) }, { x: W * rand(.75, .9) }];
+}
+
+/* ---------------- Звук ---------------- */
+let actx = null, analyser = null, fbuf = null, prevSpec = null, audioEl = null, curStream = null;
+const A = { bass: 0, mid: 0, treble: 0, energy: 0, beat: 0, alive: 0 };
+let maxB = .2, maxM = .2, maxT = .2;
+const statusEl = document.getElementById('status');
+
+function ensureAnalyser() {
+  actx = actx || new AudioContext();
+  if (analyser) analyser.disconnect();
+  analyser = actx.createAnalyser();
+  analyser.fftSize = 2048; analyser.smoothingTimeConstant = .2; // мало сглаживания — удары не размываются
+  fbuf = new Uint8Array(analyser.frequencyBinCount);
+  prevSpec = new Float32Array(analyser.frequencyBinCount);
+}
+function stopCurrent() {
+  if (curStream) curStream.getTracks().forEach(t => t.stop());
+  curStream = null;
+  if (audioEl) { audioEl.pause(); audioEl = null; }
+}
+function connectStream(stream) {
+  ensureAnalyser();
+  actx.resume();
+  actx.createMediaStreamSource(new MediaStream(stream.getAudioTracks())).connect(analyser);
+  stream.getAudioTracks()[0].addEventListener('ended', () => { analyser = null; showPanel('Звук отключён — выберите источник снова.'); });
+}
+function hidePanel() { document.getElementById('panel').style.display = 'none'; document.getElementById('hud').style.display = 'flex'; }
+function showPanel(msg) { document.getElementById('panel').style.display = 'block'; document.getElementById('hud').style.display = 'none'; statusEl.textContent = msg || ''; }
+
+document.getElementById('bTab').onclick = async () => {
+  try {
+    stopCurrent();
+    const s = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      systemAudio: 'include', selfBrowserSurface: 'exclude', preferCurrentTab: false
+    });
+    if (!s.getAudioTracks().length) {
+      s.getTracks().forEach(t => t.stop());
+      statusEl.textContent = '⚠ Звук не пришёл. Выберите именно вкладку и отметьте «Также поделиться звуком вкладки».';
+      return;
+    }
+    curStream = s; connectStream(s); resetBeat(.06); hidePanel();
+  } catch (e) { statusEl.textContent = 'Отменено: ' + e.message; }
+};
+document.getElementById('bMic').onclick = async () => {
+  try {
+    stopCurrent();
+    const s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    curStream = s; connectStream(s); resetBeat(.06); hidePanel();
+  } catch (e) { statusEl.textContent = 'Нет доступа к микрофону: ' + e.message; }
+};
+document.getElementById('bFile').onclick = () => document.getElementById('file').click();
+document.getElementById('file').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  stopCurrent(); ensureAnalyser();
+  audioEl = new Audio(URL.createObjectURL(f)); audioEl.loop = true;
+  const src = actx.createMediaElementSource(audioEl);
+  src.connect(analyser); src.connect(actx.destination);
+  actx.resume(); audioEl.play(); resetBeat(-(actx.outputLatency || .02)); hidePanel();
+};
+document.getElementById('bDemo').onclick = () => { stopCurrent(); analyser = null; resetBeat(0); hidePanel(); };
+document.getElementById('hMenu').onclick = () => showPanel();
+document.getElementById('hFull').onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+addEventListener('keydown', e => {
+  if (e.key === 'f' || e.key === 'а') document.getElementById('hFull').click();
+  if (e.key === 'ArrowRight') BT.lead += .01; // рыбки опаздывают → двигаться раньше
+  if (e.key === 'ArrowLeft') BT.lead -= .01;  // рыбки спешат → двигаться позже
+});
+
+function bandAvg(a, b) { let s = 0; for (let i = a; i < b; i++) s += fbuf[i]; return s / (b - a) / 255; }
+
+/* ---------------- Поиск ритма ----------------
+   1) находим удары (резкий рост громкости, особенно в басах);
+   2) по расстояниям между ударами вычисляем темп (BPM);
+   3) ведём «метроном», который подстраивается под удары.
+   Все движения рыбок считаются от позиции метронома — поэтому точно в такт. */
+const BT = { period: 60 / 112, phase: 0, idx: 0, pos: 0, fired: 0, lastOnset: -10, lastReal: -10,
+  iois: [], recent: [], offN: 0, kick: .5, lastLoud: -10, floor: null, warmUntil: 0, loudAcc: 0, onTimes: [], lead: 0, armed: true, hist: [] };
+let demoK = 0;
+
+function resetBeat(lead) { BT.lead = lead; BT.hist = []; BT.offN = 0; BT.iois = []; BT.recent = []; BT.rhythm = false; BT.floor = null; BT.lastLoud = -10; BT.loudAcc = 0; BT.onTimes = []; BT.cont = 0; BT.tone = null; BT.tonal = 0; }
+
+function onset(t, str) {
+  const ioi = t - BT.lastOnset;
+  BT.lastOnset = t; BT.lastReal = t;
+  // темп
+  if (ioi > .2 && ioi < 3) {
+    let i = ioi; while (i > .8) i /= 2; while (i < .375) i *= 2; // 75…160 BPM
+    BT.iois.push(i); if (BT.iois.length > 16) BT.iois.shift();
+    // самый частый интервал среди последних
+    let best = BT.period, bestN = 0;
+    for (const c of BT.iois) {
+      let s = 0, n = 0;
+      for (const x of BT.iois) if (Math.abs(x - c) / c < .06) { s += x; n++; }
+      if (n > bestN) { bestN = n; best = s / n; }
+    }
+    if (bestN >= 3) BT.period = lerp(BT.period, best, Math.abs(best - BT.period) / BT.period > .06 ? .6 : .2);
+    // это музыка? — у песни интервалы между ударами повторяются, у шума и речи — разные
+    if (BT.iois.length >= 6) {
+      const conf = bestN / BT.iois.length;
+      if (conf >= .4) BT.rhythm = true; else if (conf < .25) BT.rhythm = false;
+    }
+  }
+  // фаза: подтягиваем метроном к реальному удару
+  let err = BT.phase; if (err > .5) err -= 1;
+  if (Math.abs(err) < .22) {
+    BT.phase -= err * .45; BT.offN = 0;
+    BT.kick = lerp(BT.kick, clamp(str, .35, 1), .6);
+  } else if (str > .6 && ++BT.offN >= 3) { // метроном сбился — встаём на сильный удар заново
+    if (BT.phase > .5) BT.idx++;
+    BT.phase = 0; BT.offN = 0;
+  }
+}
+
+function analyse(t, dt) {
+  let b, m, tr, flux = 0;
+  if (analyser) {
+    analyser.getByteFrequencyData(fbuf);
+    const hz = actx.sampleRate / analyser.fftSize;
+    b = bandAvg(Math.max(1, Math.round(40 / hz)), Math.round(180 / hz));
+    m = bandAvg(Math.round(180 / hz), Math.round(2500 / hz));
+    tr = bandAvg(Math.round(2500 / hz), Math.round(11000 / hz));
+    const lo = Math.max(1, Math.round(30 / hz)), bassHi = Math.round(250 / hz), hi = Math.round(5000 / hz);
+    for (let i = lo; i < hi; i++) {
+      const d = fbuf[i] - prevSpec[i];
+      if (d > 0) flux += i < bassHi ? d * 3 : d * .5;
+      prevSpec[i] = fbuf[i];
+    }
+    // ноты: устойчивые узкие пики в спектре (150–3000 Гц). У музыки они держатся,
+    // у шума их нет, у речи высота голоса всё время скачет
+    if (!BT.tone || BT.tone.length !== fbuf.length) BT.tone = new Float32Array(fbuf.length);
+    const tLo = Math.max(4, Math.round(150 / hz)), tHi = Math.min(fbuf.length - 4, Math.round(3000 / hz));
+    let tonal = 0;
+    for (let i = tLo; i < tHi; i++) {
+      const v = fbuf[i], peak = v > 20 && v >= fbuf[i - 1] && v >= fbuf[i + 1] && v > (fbuf[i - 3] + fbuf[i + 3]) / 2 + 10;
+      BT.tone[i] = lerp(BT.tone[i], peak ? 1 : 0, Math.min(1, dt * 3));
+      if (BT.tone[i] > .6) tonal++;
+    }
+    BT.tonal = lerp(BT.tonal || 0, tonal, Math.min(1, dt * 2));
+  } else { // демо-ритм 112 BPM
+    const ph = t * 112 / 60, k = Math.floor(ph), f = ph % 1;
+    flux = k !== demoK ? 400 : 5 + Math.random() * 5; demoK = k;
+    b = .25 + .7 * Math.exp(-f * 6);
+    m = .45 + .2 * Math.sin(t * 1.3) + .2 * Math.exp(-((ph * 2) % 1) * 5);
+    tr = .35 + .2 * Math.sin(t * 3.1) + .15 * Math.random();
+  }
+  // автоматическая громкость
+  maxB = Math.max(b, maxB * .997, .04); maxM = Math.max(m, maxM * .997, .04); maxT = Math.max(tr, maxT * .997, .03);
+  A.bass = lerp(A.bass, b / maxB, .7);
+  A.mid = lerp(A.mid, m / maxM, .5);
+  A.treble = lerp(A.treble, tr / maxT, .5);
+  A.energy = lerp(A.energy, (A.bass + A.mid + A.treble) / 3 * clamp(b * 4 + m * 3, 0, 1), .15);
+
+  // детектор ударов: рост спектра выше адаптивного порога
+  const hs = BT.hist; hs.push(flux); if (hs.length > 100) hs.shift();
+  let mean = 0; for (const v of hs) mean += v; mean /= hs.length;
+  let sd = 0; for (const v of hs) sd += (v - mean) ** 2; sd = Math.sqrt(sd / hs.length);
+  // Музыка или нет? Фон комнаты (гул, улица) запоминаем по трём полосам: бас, середина, верх.
+  // Музыка (в том числе из колонок через микрофон) поднимает бас и середину;
+  // речь почти не трогает бас, шум улицы поднимает всё одинаково, хлопок слишком короткий.
+  if (BT.floor === null) { BT.sm = [b, m, tr]; BT.floor = [b, m, tr]; BT.warmUntil = t + 1.5; BT.tonalFloor = BT.tonal || 0; }
+  // фон по нотам (гул техники может давать постоянные пики — их не считаем)
+  if (t < BT.warmUntil) BT.tonalFloor = Math.max(BT.tonalFloor, BT.tonal || 0);
+  else if (t - BT.lastLoud > 3) BT.tonalFloor = lerp(BT.tonalFloor, BT.tonal || 0, Math.min(1, dt * ((BT.tonal || 0) < BT.tonalFloor ? .3 : .02)));
+  const notes = (BT.tonal || 0) - BT.tonalFloor;
+  [b, m, tr].forEach((x, i) => BT.sm[i] = lerp(BT.sm[i], x, Math.min(1, dt * 1.5))); // средняя громкость за ~0,7 с
+  const lv = BT.sm;
+  const musicNow = t - BT.lastLoud < 3;
+  for (let i = 0; i < 3; i++) {
+    const f = BT.floor[i], x = lv[i];
+    if (t < BT.warmUntil) BT.floor[i] = lerp(f, x, .1);                          // первые 1,5 с — слушаем фон
+    else if (x < f) BT.floor[i] = lerp(f, x, Math.min(1, dt * (x < f - .05 ? 1.5 : .15))); // стало тише — фон вниз
+    else if (!musicNow) BT.floor[i] = lerp(f, x, Math.min(1, dt * .05));          // средний шум за ~20 с (тихая музыка не «растворяется» в фоне)
+    else BT.floor[i] += dt * .001;                                               // во время музыки почти не меняем
+  }
+  while (BT.onTimes.length && t - BT.onTimes[0] > 3) BT.onTimes.shift();
+  // уровни в децибелах — сравниваем разницу с фоном
+  const dB = lv[0] - BT.floor[0], dM = lv[1] - BT.floor[1], dT = lv[2] - BT.floor[2];
+  const top = Math.max(dB, dM);
+  // непрерывность: музыка звучит без пауз, а в речи и хлопках постоянно короткие провалы
+  const rawTop = Math.max(b - BT.floor[0], m - BT.floor[1]);
+  BT.cont = lerp(BT.cont || 0, rawTop > .008 ? 1 : 0, Math.min(1, dt * 1.2));
+  const noiseLike = dT > .08 && dT >= top * .9;                // шум улицы поднимает все частоты одинаково
+  BT.meter = clamp(top / .1, 0, 1);                            // для индикатора громкости
+  const evidence = t >= BT.warmUntil && (musicNow
+    ? (dB + dM > .03 && notes >= .8) || notes >= 1.2           // песня продолжается (тихие места не прерывают)
+    : (top > .025 && dB + dM > .04 && !noiseLike && BT.cont > .85 && notes >= 1) // громче фона и есть ноты
+      || dB + dM + dT > .8                                     // резкий скачок из полной тишины (звук вкладки)
+      || notes >= 1.4);                                        // слышны устойчивые ноты — музыка, даже тихая
+  // тихая музыка должна звучать дольше (~2 с), громкая — ~1 с
+  const rate = musicNow ? 1 : Math.max(clamp(top / .06, .4, 1), notes >= 1.4 ? .5 : 0);
+  // если ноты слышны хоть немного — накопленное почти не теряем (тихая музыка то пропадает, то появляется)
+  BT.loudAcc = evidence ? Math.min(2, BT.loudAcc + dt * rate) : Math.max(0, BT.loudAcc - dt * (notes >= .5 ? .25 : 1.5));
+  if (BT.loudAcc > 1) BT.lastLoud = t;
+  if (BT.armed && flux > mean + 1.3 * sd + 2 && t - BT.lastOnset > .18 && hs.length > 20) {
+    onset(t, (flux - mean) / (2.5 * sd + 1)); BT.armed = false; BT.onTimes.push(t);
+  }  if (flux < mean) BT.armed = true;
+
+  // метроном
+  BT.phase += dt / BT.period;
+  while (BT.phase >= 1) { BT.phase -= 1; BT.idx++; }
+  BT.pos = BT.idx + BT.phase + BT.lead / BT.period;
+  const fl = Math.floor(BT.pos);
+  if (fl > BT.fired) { BT.fired = fl; onBeat(fl); }
+
+  const quiet = t - BT.lastReal > 2 || t - BT.lastLoud > 1;
+  if (quiet) BT.kick = Math.max(.15, BT.kick - dt * .4);
+  A.alive = lerp(A.alive, quiet ? .2 : 1, dt * 2);
+}
+// звук анализируем 100 раз в секунду отдельно от рисования —
+// так ритм не сбивается, даже если компьютер рисует мало кадров
+let lastA = performance.now();
+setInterval(() => {
+  const now = performance.now();
+  analyse(now / 1000, Math.min(.25, (now - lastA) / 1000));
+  lastA = now;
+}, 10);
+
+/* ---------------- Хореография ---------------- */
+// [движение, сколько ударов]
+// подплыли → поцелуй (вокруг собирается большое сердце) → отплыли (сердечки всплывают) → немного танца → снова
+const SEQ = [['approach', 2], ['kiss', 8], ['retreat', 3], ['dance', 3]];
+let seqI = 0, beatsIn = 0, phase = SEQ[0][0];
+function mkFish(o) {
+  return Object.assign({ x: 0, y: 0, ang: 0, tailPh: 0, finPh: 0, tailAmp: .3, blink: 0, nextBlink: rand(1, 3),
+    happy: 0, surprise: 0, blush: 0, pucker: 0, lookX: 1, lookY: 0, sq: 0 }, o);
+}
+// Пары рыбок: главная в центре и ещё 6 пар поменьше, каждая пара — одного размера.
+// scale — размер, hx/hy — «дом» пары в аквариуме (доли экрана), off — сдвиг, чтобы без музыки плавали не одновременно
+function mkPair(scale, hx, hy, off, hueA, hueB) {
+  return { scale, hx, hy, off, ring: [], ringNext: 0, lastKissBeat: -1,
+    pair: { cx: 0, cy: 0, d: 0, base: 0, th: 0, wD: 1, wK: 0 },
+    fishA: mkFish({ hue: hueA, lashes: true }), fishB: mkFish({ hue: hueB, lashes: false }) };
+}
+const PAIRS = [
+  mkPair(1,   .50, .46, 0,   40, 24),   // главная пара
+  mkPair(.62, .23, .24, 3.1, 44, 28),
+  mkPair(.56, .77, .23, 5.7, 36, 18),
+  mkPair(.50, .21, .66, 1.6, 48, 30),
+  mkPair(.44, .79, .65, 7.2, 38, 20),
+  mkPair(.38, .50, .14, 2.4, 46, 26),
+  mkPair(.32, .50, .77, 8.4, 42, 16),
+];
+// текущая пара (функции ниже работают с ней)
+let curP = PAIRS[0], pair = curP.pair, fishA = curP.fishA, fishB = curP.fishB;
+
+function onBeat(n) {
+  if (++beatsIn >= SEQ[seqI][1]) { seqI = (seqI + 1) % SEQ.length; beatsIn = 0; phase = SEQ[seqI][0]; }
+  if (phase === 'dance' && BT.kick > .8 && n % 4 === 0) for (const P of PAIRS) P.fishA.surprise = P.fishB.surprise = 1;
+  const nb = Math.round(1 + BT.kick * 8 * A.alive);
+  for (const bb of bubblers) for (let i = 0; i < nb; i++) spawnBubble(bb.x + rand(-10, 10), sandTop(bb.x) - 10, true);
+}
+
+// все пары делают одно и то же; каждая — в своём размере и на своём месте
+function updateChoreo(t, dt) {
+  for (const P of PAIRS) {
+    curP = P; pair = P.pair; fishA = P.fishA; fishB = P.fishB;
+    ring = P.ring; ringNext = P.ringNext; lastKissBeat = P.lastKissBeat;
+    S = baseS * P.scale;
+    updatePair(t, dt);
+    P.ring = ring; P.ringNext = ringNext; P.lastKissBeat = lastKissBeat;
+  }
+  curP = PAIRS[0]; pair = curP.pair; fishA = curP.fishA; fishB = curP.fishB; ring = curP.ring; S = baseS;
+}
+
+function updatePair(t, dt) {
+  const contact = S * 1.16;
+  const bp = BT.pos, ph = bp - Math.floor(bp), beatN = Math.floor(bp);
+  const pulse = Math.exp(-ph * 5) * BT.kick;      // толчок ровно на удар
+  const live = .3 + .7 * A.alive;                  // в тишине — спокойнее
+  // целуются на любой звук (музыка, шум, хлопок); в тишине — подплывают и отплывают, не касаясь
+  const musicOn = !!analyser && t - BT.lastLoud < 3;
+  if (musicOn && !pair.musicOn) { seqI = 0; beatsIn = 0; phase = SEQ[0][0]; } // звук появился — сразу целоваться
+  const kissing = musicOn && phase === 'kiss';
+  pair.musicOn = musicOn;
+  // без музыки отплывают далеко, но не за край экрана
+  const edge = Math.min(curP.hx, 1 - curP.hx) * W - S * 1.3 - W * .06 * curP.scale * .2;
+  const farD = Math.max(contact * 1.4, Math.min(S * 3.6, W * .42, edge * 2));
+  let baseD, em = { happy: 0, blush: .1, pucker: 0, lookY: 0 };
+  switch (phase) {
+    case 'dance': baseD = musicOn ? S * 2.05 : farD; break;
+    case 'approach':
+      baseD = contact * (musicOn ? 1.1 : 1.06);
+      em = { happy: 0, blush: .5, pucker: musicOn ? 1 : 0, lookY: .1 }; break;
+    case 'kiss':
+      if (musicOn) { baseD = contact; em = { happy: 1, blush: 1, pucker: 1, lookY: 0 }; }
+      // без музыки — совсем близко, нос к носу, но губы не касаются
+      else { baseD = contact * 1.06 + S * .02 * Math.sin(t * 1.5); em = { happy: 0, blush: .7, pucker: 0, lookY: .1 }; }
+      break;
+    case 'retreat': baseD = musicOn ? S * 2.9 : farD; em = { happy: .6, blush: 1, pucker: 0, lookY: .2 }; break;
+    case 'shy': baseD = S * 2.4; em = { happy: 0, blush: .9, pucker: 0, lookY: .6 }; break;
+  }
+  // без музыки — никакой хореографии: плавно подплывают и отплывают (цикл ~7 с), губы не касаются
+  if (!musicOn) {
+    const c = (1 - Math.cos(TAU * (t + curP.off) / 10)) / 2; // плавный цикл ~10 с
+    const k = c * c * (3 - 2 * c);              // мягкий разгон и торможение; 0 — далеко, 1 — близко
+    baseD = lerp(farD, contact * 1.025, k); // губы почти касаются — остаётся «миллиметр»
+    em = { happy: 0, blush: .2 + .4 * k, pucker: 0, lookY: .1 };
+  }
+  const dancing = musicOn && (phase === 'dance' || phase === 'shy');
+  pair.base = lerp(pair.base || baseD, baseD, Math.min(1, dt * (musicOn ? (phase === 'retreat' ? 3 : 6) : 10)));
+  pair.wD = lerp(pair.wD, dancing ? 1 : 0, Math.min(1, dt * 5));
+  pair.wK = lerp(pair.wK, kissing ? 1 : 0, Math.min(1, dt * 8));
+
+  // ближе-дальше: сходятся на нечётный удар, расходятся на чётный
+  const oscD = S * .5 * Math.cos(Math.PI * bp) * live;
+  // поцелуй: губы касаются ровно на удар, между ударами чуть отстраняются
+  const oscK = contact * .14 * Math.sin(Math.PI * ph);
+  pair.d = pair.base + pair.wD * oscD + pair.wK * oscK;
+  pair.th = pair.wD * .4 * Math.sin(Math.PI * bp / 4) * live;
+  pair.cx = W * curP.hx + W * .06 * curP.scale * Math.sin(Math.PI * bp / 16) * (.2 + .8 * pair.wD);
+  pair.cy = H * curP.hy + H * .04 * curP.scale * Math.sin(Math.PI * bp / 8) * pair.wD + S * .07 * pulse;
+
+  // краснеют при приближении: чем ближе — тем сильнее румянец
+  const closeness = clamp((S * 2.4 - pair.d) / (S * 2.4 - contact), 0, 1);
+  em.blush = Math.max(em.blush, closeness);
+  const dx = Math.cos(pair.th) * pair.d / 2, dy = Math.sin(pair.th) * pair.d / 2;
+  const nod = pair.wD * .28 * Math.cos(Math.PI * bp) * live + pair.wK * .06 * Math.sin(Math.PI * ph);
+  [[fishA, -1], [fishB, 1]].forEach(([f, sgn]) => {
+    // качели: одна вверх — другая вниз, смена на каждый удар
+    const see = pair.wD * S * .12 * Math.cos(Math.PI * bp) * sgn * live;
+    // «приседание» на удар — по очереди
+    const mine = (beatN % 2 === 0) === (sgn < 0);
+    const dip = pair.wD * S * .1 * (mine ? pulse : pulse * .3);
+    f.x = pair.cx + sgn * dx;
+    f.y = pair.cy + sgn * dy + see + dip;
+    // эмоции
+    f.happy = lerp(f.happy, em.happy, dt * 6);
+    f.blush = lerp(f.blush, em.blush, dt * 3);
+    f.pucker = lerp(f.pucker, em.pucker, dt * 6);
+    f.lookY = lerp(f.lookY, em.lookY + (dancing ? .35 * Math.cos(Math.PI * bp) : 0), dt * 10);
+    f.surprise = Math.max(0, f.surprise - dt * 2.5);
+    f.sq = A.beat;
+    // хвост: один взмах на каждый удар, на сильных долях — шире
+    f.tailPh = TAU * bp + Math.PI / 2;
+    f.tailAmp = lerp(f.tailAmp, (.22 + .45 * A.bass + .3 * A.beat) * live + .08, Math.min(1, dt * 12));
+    // плавники: два взмаха на удар
+    f.finPh = TAU * bp * 2;
+    // моргание
+    f.nextBlink -= dt;
+    if (f.nextBlink < 0) { f.blink = 1; f.nextBlink = rand(1.5, 4); }
+    f.blink = Math.max(0, f.blink - dt * 7);
+  });
+  const ang = Math.atan2(fishB.y - fishA.y, fishB.x - fishA.x);
+  fishA.ang = ang + nod;           // кивают синхронно, носом вниз на удар
+  fishB.ang = ang + Math.PI - nod;
+
+  // сердечки из места поцелуя: на каждый удар вылетает порция и встаёт на своё место
+  // в большом сердце вокруг рыбок; между ударами — понемногу маленькие всплывают
+  pair.kx = (fishA.x + fishB.x) / 2; pair.ky = (fishA.y + fishB.y) / 2 + S * .03;
+  if (kissing && pair.wK > .7) {
+    if (beatN !== lastKissBeat) {
+      lastKissBeat = beatN;
+      const per = Math.ceil(RING_N / SEQ[seqI][1]); // к концу поцелуя сердце собрано
+      for (let i = 0; i < per && ringNext < RING_N; i++) launchRing(RING_ORDER[ringNext++], t);
+    }
+    if (Math.random() < dt * 3 * curP.scale) spawnHeart(pair.kx, pair.ky);
+  } else if (ring.length && !kissing) releaseRing();
+  for (const r of ring) { // полёт от губ к своему месту с лёгким перелётом
+    const [tx, ty] = ringPos(r), k = clamp((t - r.born) / .6, 0, 1);
+    const e = 1 + 2.2 * (k - 1) ** 3 + 1.2 * (k - 1) ** 2;
+    r.x = pair.kx + (tx - pair.kx) * e; r.y = pair.ky + (ty - pair.ky) * e;
+    r.ph += dt * 3;
+  }
+}
+
+/* ---------------- Сердечки ---------------- */
+let hearts = [], ring = [], ringNext = 0, lastKissBeat = -1;
+const RING_N = 40;
+// порядок заполнения: от верхней ямочки сердца симметрично вниз к острию
+const RING_ORDER = [0];
+for (let k = 1; RING_ORDER.length < RING_N; k++) { RING_ORDER.push(k); if (RING_ORDER.length < RING_N) RING_ORDER.push(RING_N - k); }
+function heartPt(tt) { // классическая кривая сердца, x: -16…16, y: -12…17
+  return [16 * Math.sin(tt) ** 3, -(13 * Math.cos(tt) - 5 * Math.cos(2 * tt) - 2 * Math.cos(3 * tt) - Math.cos(4 * tt))];
+}
+function ringPos(r) {
+  const [hx, hy] = heartPt(TAU * r.slot / RING_N);
+  const sy = Math.min(S * .075, H * .8 / 29);
+  return [pair.kx + hx * S * .125, pair.ky + (hy - 1) * sy];
+}
+function launchRing(slot, t) {
+  ring.push({ slot, born: t, s: S * rand(.09, .12), rot: rand(-.3, .3), ph: rand(0, TAU), l: rand(62, 76), x: pair.kx, y: pair.ky });
+}
+function releaseRing() { // поцелуй закончился — сердечки отрываются и всплывают вверх
+  for (const r of ring) {
+    const dx = r.x - pair.kx, len = Math.abs(dx) || 1;
+    hearts.push({ x: r.x, y: r.y, vx: dx / len * rand(10, 35), vy: -rand(50, 110), s: r.s, rot: r.rot, vr: rand(-.8, .8),
+      life: .15, max: rand(3, 4.5), ph: r.ph, l: r.l });
+  }
+  ring = []; ringNext = 0;
+}
+function spawnHeart(x, y) {
+  const a = -Math.PI / 2 + rand(-1, 1), sp = rand(30, 60);
+  hearts.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, s: S * rand(.05, .08),
+    rot: rand(-.4, .4), vr: rand(-1, 1), life: 0, max: rand(1.8, 3), ph: rand(0, TAU), l: rand(62, 78) });
+  if (hearts.length > 150) hearts.shift();
+}
+function updHearts(t, dt) {
+  for (const h of hearts) {
+    h.life += dt; h.ph += dt * 4;
+    h.vx *= 1 - dt * 1.2; h.vy = h.vy * (1 - dt * .6) - 30 * dt; // всплывают
+    h.x += (h.vx + Math.sin(h.ph) * 20) * dt; h.y += h.vy * dt; h.rot += h.vr * dt;
+  }
+  hearts = hearts.filter(h => h.life < h.max);
+}
+function drawHearts() {
+  for (const h of hearts) {
+    const k = h.life / h.max;
+    drawHeart(h.x, h.y, h.s * Math.min(1, h.life * 6) * (1 + A.beat * .25), h.rot + Math.sin(h.ph) * .15,
+      k < .7 ? 1 : 1 - (k - .7) / .3, h.l);
+  }
+  for (const P of PAIRS) for (const r of P.ring) drawHeart(r.x, r.y, r.s * (1 + A.beat * .35), r.rot + Math.sin(r.ph) * .12, 1, r.l);
+}
+function drawHeart(x, y, s, rot, alpha, l) {
+  {
+    ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
+    ctx.scale(s, s);
+    ctx.globalAlpha = alpha;
+    if (s > 9) { ctx.shadowColor = 'rgba(255,90,160,.8)'; ctx.shadowBlur = 12; } // свечение только у крупных — так быстрее
+    ctx.beginPath();
+    ctx.moveTo(0, .35);
+    ctx.bezierCurveTo(-.1, .25, -.5, .05, -.5, -.2);
+    ctx.bezierCurveTo(-.5, -.5, -.1, -.55, 0, -.25);
+    ctx.bezierCurveTo(.1, -.55, .5, -.5, .5, -.2);
+    ctx.bezierCurveTo(.5, .05, .1, .25, 0, .35);
+    const g = ctx.createLinearGradient(0, -.5, 0, .35);
+    g.addColorStop(0, hsl(335, 100, l + 10)); g.addColorStop(1, hsl(340, 95, l - 15));
+    ctx.fillStyle = g; ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255,255,255,.7)';
+    ctx.beginPath(); ctx.ellipse(-.23, -.27, .1, .06, -.6, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* ---------------- Рисование рыбки (смотрит вправо, длина ~1) ---------------- */
+function bodyPath() {
+  ctx.beginPath();
+  ctx.moveTo(.56, .02);
+  ctx.bezierCurveTo(.55, -.27, .05, -.37, -.25, -.2);
+  ctx.quadraticCurveTo(-.4, -.12, -.46, -.05);
+  ctx.lineTo(-.46, .05);
+  ctx.quadraticCurveTo(-.4, .12, -.25, .19);
+  ctx.bezierCurveTo(.05, .33, .52, .29, .56, .02);
+  ctx.closePath();
+}
+const hsl = (h, s, l, a = 1) => `hsla(${h},${s}%,${l}%,${a})`;
+
+function finFill(h, x0, y0, x1, y1) {
+  const g = ctx.createLinearGradient(x0, y0, x1, y1);
+  g.addColorStop(0, hsl(h, 95, 55, .95)); g.addColorStop(1, hsl(h + 10, 100, 75, .35));
+  return g;
+}
+
+function drawTail(f) {
+  const w = f.tailPh, a = f.tailAmp, h = f.hue;
+  ctx.save(); ctx.translate(-.43, 0); ctx.rotate(Math.sin(w) * a * .55);
+  const L = .66, s1 = Math.sin(w - 1) * a, s2 = Math.sin(w - 1.7) * a, s3 = Math.sin(w - 2.4) * a;
+  const top = [-L, -.5 + s3 * .35], bot = [-L * .95, .5 + s3 * .35], notch = [-L * .5, s2 * .25];
+  ctx.beginPath(); ctx.moveTo(0, -.07);
+  ctx.bezierCurveTo(-L * .3, -.2 + s1 * .1, -L * .7, -.42 + s2 * .2, top[0], top[1]);
+  ctx.quadraticCurveTo(-L * .75, -.15 + s2 * .3, notch[0], notch[1]);
+  ctx.quadraticCurveTo(-L * .75, .15 + s2 * .3, bot[0], bot[1]);
+  ctx.bezierCurveTo(-L * .7, .42 + s2 * .2, -L * .3, .2 + s1 * .1, 0, .07);
+  ctx.closePath();
+  ctx.fillStyle = finFill(h, 0, 0, -L, 0); ctx.fill();
+  ctx.strokeStyle = hsl(h, 90, 40, .35); ctx.lineWidth = .008;
+  for (let i = -4; i <= 4; i++) {
+    const k = i / 4;
+    ctx.beginPath(); ctx.moveTo(0, k * .05);
+    ctx.quadraticCurveTo(-L * .5, k * .3 + s1 * .15, -L * (.85 - Math.abs(k) * .1 + (Math.abs(k) > .1 ? .15 : -.3)), k * .48 + s3 * .3);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawFin(px, py, rot, len, wid, h, alpha = 1) {
+  ctx.save(); ctx.translate(px, py); ctx.rotate(rot); ctx.globalAlpha *= alpha;
+  ctx.beginPath(); ctx.moveTo(0, -wid * .4);
+  ctx.quadraticCurveTo(-len * .6, -wid, -len, 0);
+  ctx.quadraticCurveTo(-len * .6, wid * .7, 0, wid * .4);
+  ctx.closePath();
+  ctx.fillStyle = finFill(h, 0, 0, -len, 0); ctx.fill();
+  ctx.strokeStyle = hsl(h, 90, 40, .3); ctx.lineWidth = .006;
+  for (let i = -1; i <= 1; i++) { ctx.beginPath(); ctx.moveTo(0, i * wid * .2); ctx.lineTo(-len * .9, i * wid * .3); ctx.stroke(); }
+  ctx.restore();
+}
+
+function drawFish(f, sz) {
+  const h = f.hue, fp = f.finPh, a = f.ang;
+  ctx.save(); ctx.translate(f.x, f.y);
+  if (Math.cos(a) < 0) { ctx.scale(-1, 1); ctx.rotate(Math.PI - a); } else ctx.rotate(a);
+  ctx.scale(sz, sz);
+  ctx.scale(1 + f.sq * .07, 1 - f.sq * .06);
+
+  // дальний грудной плавник
+  drawFin(.12, .1, .5 + Math.sin(fp + 1) * .6, .2, .1, h, .6);
+  drawTail(f);
+  // спинной плавник
+  const dw = Math.sin(fp * .5) * .05, dw2 = Math.sin(fp * .5 - 1.2) * .07;
+  ctx.beginPath(); ctx.moveTo(.2, -.27);
+  ctx.quadraticCurveTo(.06, -.5 + dw, -.14, -.53 + dw2);
+  ctx.quadraticCurveTo(-.2, -.36 + dw2, -.34, -.15);
+  ctx.closePath(); ctx.fillStyle = finFill(h, 0, -.25, -.1, -.55); ctx.fill();
+  // брюшной и анальный плавники
+  drawFin(.02, .25, -1.1 + Math.sin(fp + 2) * .35, .17, .07, h);
+  drawFin(-.27, .17, -.6 + Math.sin(fp + 3) * .3, .17, .08, h);
+
+  // тело
+  bodyPath();
+  const g = ctx.createRadialGradient(.18, -.12, .02, .05, 0, .6);
+  g.addColorStop(0, hsl(h + 15, 100, 82)); g.addColorStop(.35, hsl(h + 5, 100, 60)); g.addColorStop(1, hsl(h - 10, 90, 40));
+  ctx.fillStyle = g; ctx.fill();
+  // чешуйки
+  ctx.save(); bodyPath(); ctx.clip();
+  ctx.strokeStyle = hsl(h - 10, 90, 35, .22); ctx.lineWidth = .008;
+  for (let x = -.4, row = 0; x < .3; x += .065, row++)
+    for (let y = -.32 + (row % 2) * .03; y < .32; y += .06) { ctx.beginPath(); ctx.arc(x, y, .04, -Math.PI / 2, Math.PI / 2, true); ctx.stroke(); }
+  const belly = ctx.createLinearGradient(0, .05, 0, .3);
+  belly.addColorStop(0, 'rgba(255,240,200,0)'); belly.addColorStop(1, 'rgba(255,240,200,.45)');
+  ctx.fillStyle = belly; ctx.fillRect(-.5, 0, 1.1, .4);
+  ctx.fillStyle = 'rgba(255,255,255,.28)';
+  ctx.beginPath(); ctx.ellipse(.12, -.17, .2, .05, -.15, 0, TAU); ctx.fill();
+  ctx.restore();
+  // жабра
+  ctx.strokeStyle = hsl(h - 10, 90, 38, .6); ctx.lineWidth = .014; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(.24, .0, .17, -.9, .9); ctx.stroke();
+
+  // румянец
+  if (f.blush > .02) {
+    const br = .1 + .03 * f.blush;
+    const bg = ctx.createRadialGradient(.33, .11, 0, .33, .11, br);
+    bg.addColorStop(0, `rgba(255,40,100,${.9 * f.blush})`); bg.addColorStop(.6, `rgba(255,70,120,${.45 * f.blush})`); bg.addColorStop(1, 'rgba(255,70,120,0)');
+    ctx.fillStyle = bg; ctx.beginPath(); ctx.arc(.33, .11, br, 0, TAU); ctx.fill();
+    // лёгкий розовый отлив по всей мордочке
+    ctx.save(); bodyPath(); ctx.clip();
+    const fg = ctx.createRadialGradient(.38, .02, 0, .38, .02, .3);
+    fg.addColorStop(0, `rgba(255,60,110,${.28 * f.blush})`); fg.addColorStop(1, 'rgba(255,60,110,0)');
+    ctx.fillStyle = fg; ctx.fillRect(0, -.4, .6, .8);
+    ctx.restore();
+  }
+
+  // глаз
+  const ex = .33, ey = -.08, r = .1 * (1 + .35 * f.surprise);
+  if (f.happy > .5) {
+    ctx.strokeStyle = '#2a1206'; ctx.lineWidth = .025;
+    ctx.beginPath(); ctx.arc(ex, ey + .03, r * .75, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke();
+    if (f.lashes) lashes(ex, ey + .03, r * .75);
+  } else {
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(ex, ey, r, 0, TAU); ctx.fill();
+    ctx.strokeStyle = hsl(h - 10, 80, 35, .6); ctx.lineWidth = .01; ctx.stroke();
+    const pr = r * (.6 - .2 * f.surprise), px = ex + r * .32 * f.lookX, py = ey + r * .35 * f.lookY;
+    ctx.fillStyle = '#1b0d05'; ctx.beginPath(); ctx.arc(px, py, pr, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(px - pr * .3, py - pr * .35, pr * .32, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(px + pr * .35, py + pr * .3, pr * .13, 0, TAU); ctx.fill();
+    // веко: моргание и смущение
+    const lid = Math.max(f.blink > .5 ? 2 - f.blink * 2 : f.blink * 2, f.blush * .35, phase === 'shy' ? .45 : 0);
+    if (lid > .02) {
+      ctx.save(); ctx.beginPath(); ctx.arc(ex, ey, r * 1.02, 0, TAU); ctx.clip();
+      ctx.fillStyle = hsl(h + 5, 100, 58); ctx.fillRect(ex - r * 1.1, ey - r * 1.1, r * 2.2, r * 2.2 * lid);
+      ctx.restore();
+    }
+    if (f.lashes) lashes(ex, ey, r);
+  }
+
+  // рот: улыбка ↔ губки бантиком
+  const p = f.pucker;
+  if (p < .95) {
+    ctx.globalAlpha = 1 - p;
+    ctx.strokeStyle = '#7a2a10'; ctx.lineWidth = .018;
+    ctx.beginPath(); ctx.arc(.47, .02, .07, .25, 1.15); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  if (p > .05) {
+    ctx.globalAlpha = p;
+    const lx = .56 + .05 * p;
+    ctx.fillStyle = '#ff4f86';
+    ctx.beginPath(); ctx.ellipse(lx, .03, .035 + .025 * p, .05 + .02 * p, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#b3134a';
+    ctx.beginPath(); ctx.ellipse(lx + .01, .03, .012 + .008 * p, .022, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.6)';
+    ctx.beginPath(); ctx.ellipse(lx - .01, .0, .012, .007, -.4, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // ближний грудной плавник — активно машет
+  drawFin(.16, .12, .7 + Math.sin(fp) * .75, .22, .11, h, .95);
+  ctx.restore();
+}
+function lashes(ex, ey, r) {
+  ctx.strokeStyle = '#2a1206'; ctx.lineWidth = .012;
+  for (let i = 0; i < 3; i++) {
+    const an = -Math.PI * (.35 + i * .17);
+    ctx.beginPath(); ctx.moveTo(ex + Math.cos(an) * r, ey + Math.sin(an) * r);
+    ctx.lineTo(ex + Math.cos(an) * r * 1.45, ey + Math.sin(an) * r * 1.45); ctx.stroke();
+  }
+}
+
+/* ---------------- Фон ---------------- */
+function drawWater(t) {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  const lift = A.energy * 6;
+  g.addColorStop(0, hsl(182, 85, 62 + lift)); g.addColorStop(.45, hsl(188, 80, 42 + lift * .6)); g.addColorStop(1, hsl(198, 75, 24));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // поверхность воды
+  ctx.fillStyle = 'rgba(255,255,255,.12)';
+  ctx.beginPath(); ctx.moveTo(0, 0);
+  for (let x = 0; x <= W; x += 20) ctx.lineTo(x, 10 + Math.sin(x * .02 + t * 2) * 4 + Math.sin(x * .05 - t * 3) * 2);
+  ctx.lineTo(W, 0); ctx.fill();
+  // солнечные лучи
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 7; i++) {
+    const x = W * (i + .5) / 7 + Math.sin(t * .3 + i) * W * .04, w = W * (.03 + .03 * ((i * 7) % 3));
+    const al = .05 + .07 * A.treble * (.6 + .4 * Math.sin(t * 1.3 + i * 2)) + .07 * A.beat;
+    const lg = ctx.createLinearGradient(0, 0, 0, H * .85);
+    lg.addColorStop(0, `rgba(255,255,220,${al})`); lg.addColorStop(1, 'rgba(255,255,220,0)');
+    ctx.fillStyle = lg;
+    ctx.beginPath(); ctx.moveTo(x - w / 2, 0); ctx.lineTo(x + w / 2, 0);
+    ctx.lineTo(x + w * 1.6 + W * .05, H * .85); ctx.lineTo(x - w * .4 + W * .05, H * .85); ctx.fill();
+  }
+  // каустика — мерцающие пятна света
+  ctx.fillStyle = `rgba(255,255,255,${.03 + .04 * A.treble})`;
+  for (let i = 0; i < 26; i++) {
+    const x = (i * 197 % W) + Math.sin(t * .7 + i) * 30, y = (i * 131 % (H * .8)) + Math.cos(t * .5 + i * 1.3) * 20;
+    ctx.beginPath(); ctx.ellipse(x, y, 30 + 10 * Math.sin(t + i), 10, Math.sin(i), 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawWeed(w, t) {
+  // водоросли качаются в такт: полный размах за 2 удара
+  const sway = 10 + 35 * A.mid * A.alive;
+  const bp = BT.pos;
+  const base = sandTop(w.x) + 4;
+  const pts = [];
+  for (let i = 0; i <= w.segs; i++) {
+    const k = i / w.segs;
+    pts.push([w.x + Math.sin(Math.PI * bp + w.ph * .3 - i * .25) * sway * Math.pow(k, 1.4) + Math.sin(t * .5 + w.ph) * 15 * k, base - w.h * k]);
+  }
+  ctx.beginPath();
+  for (let i = 0; i <= w.segs; i++) { const wd = w.w * (1 - i / w.segs * .85); i ? ctx.lineTo(pts[i][0] - wd / 2, pts[i][1]) : ctx.moveTo(pts[i][0] - wd / 2, pts[i][1]); }
+  for (let i = w.segs; i >= 0; i--) { const wd = w.w * (1 - i / w.segs * .85); ctx.lineTo(pts[i][0] + wd / 2, pts[i][1]); }
+  ctx.closePath();
+  const g = ctx.createLinearGradient(0, base, 0, base - w.h);
+  g.addColorStop(0, hsl(w.hue, 60, 22, w.front ? 1 : .85)); g.addColorStop(1, hsl(w.hue, 70, 48, w.front ? 1 : .85));
+  ctx.fillStyle = g; ctx.fill();
+  // листочки
+  ctx.fillStyle = hsl(w.hue, 65, 40, .9);
+  for (let i = 3; i < w.segs; i += 3) {
+    const [x, y] = pts[i], s = i % 2 ? 1 : -1;
+    ctx.beginPath(); ctx.ellipse(x + s * w.w * .9, y, w.w * 1.1, w.w * .35, s * -.6 + Math.sin(t * 2 + i) * .2, 0, TAU); ctx.fill();
+  }
+}
+
+function drawCoral(c, t) {
+  const base = sandTop(c.x) + 6, sz = S * .55 * c.size;
+  const pulse = 1 + .06 * A.beat;
+  ctx.save(); ctx.translate(c.x, base); ctx.scale(pulse, pulse);
+  ctx.strokeStyle = c.col; ctx.fillStyle = c.col; ctx.lineCap = 'round';
+  if (c.type === 0) { // ветвистый
+    const branch = (x, y, ang, len, wd, depth) => {
+      const sw = Math.sin(t * 1.1 + depth + c.seed) * .06;
+      const x2 = x + Math.cos(ang + sw) * len, y2 = y + Math.sin(ang + sw) * len;
+      ctx.lineWidth = wd; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x2, y2); ctx.stroke();
+      if (depth < 4) { branch(x2, y2, ang - .45, len * .72, wd * .7, depth + 1); branch(x2, y2, ang + .4, len * .7, wd * .7, depth + 1); }
+      else { ctx.beginPath(); ctx.arc(x2, y2, wd * .9, 0, TAU); ctx.fill(); }
+    };
+    branch(0, 0, -Math.PI / 2, sz * .35, sz * .09, 0);
+  } else { // кустик-трубочки
+    for (let i = -2; i <= 2; i++) {
+      const hgt = sz * (.5 + .25 * Math.cos(i * 1.3)) * (1 + .08 * Math.sin(t * 2 + i));
+      const x = i * sz * .13;
+      ctx.lineWidth = sz * .1; ctx.beginPath(); ctx.moveTo(x * .4, 0); ctx.quadraticCurveTo(x, -hgt * .5, x * 1.2, -hgt); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.beginPath(); ctx.ellipse(x * 1.2, -hgt, sz * .05, sz * .025, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = c.col;
+    }
+  }
+  ctx.restore();
+}
+
+function spawnBubble(x, y, burst) {
+  bubbles.push({ x, y, r: rand(2, burst ? 4 + 9 * A.bass : 6), vy: rand(40, 90), ph: rand(0, TAU), wob: rand(10, 25) });
+}
+function updBubbles(t, dt) {
+  for (const b of bubblers) if (Math.random() < dt * 4) spawnBubble(b.x + rand(-6, 6), sandTop(b.x) - 10);
+  if (Math.random() < dt * 1.5) spawnBubble(fishA.x + S * .5 * Math.cos(fishA.ang), fishA.y, false);
+  if (Math.random() < dt * 1.5) spawnBubble(fishB.x + S * .5 * Math.cos(fishB.ang), fishB.y, false);
+  for (const b of bubbles) { b.y -= b.vy * (1 + A.beat * 1.5) * dt; b.vy += dt * 15; b.ph += dt * 3; }
+  bubbles = bubbles.filter(b => b.y > -20);
+  if (bubbles.length > 500) bubbles.splice(0, bubbles.length - 500);
+}
+function drawBubbles() {
+  ctx.lineWidth = 1.2;
+  for (const b of bubbles) {
+    const x = b.x + Math.sin(b.ph) * b.wob * .3;
+    ctx.strokeStyle = 'rgba(230,255,255,.7)'; ctx.fillStyle = 'rgba(220,255,255,.12)';
+    ctx.beginPath(); ctx.arc(x, b.y, b.r, 0, TAU); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,.85)';
+    ctx.beginPath(); ctx.arc(x - b.r * .35, b.y - b.r * .35, b.r * .25, 0, TAU); ctx.fill();
+  }
+}
+function drawBubblers() {
+  for (const b of bubblers) {
+    const y = sandTop(b.x);
+    ctx.fillStyle = '#7d8f99'; ctx.beginPath(); ctx.ellipse(b.x, y, 22, 8, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#a9bcc6'; ctx.beginPath(); ctx.ellipse(b.x, y - 3, 16, 5, 0, 0, TAU); ctx.fill();
+  }
+}
+
+/* ---------------- Цикл ---------------- */
+const modeEl = document.getElementById('mode'), dotEl = document.getElementById('dot'), bpmEl = document.getElementById('bpm');
+let last = performance.now(), hudT = 0;
+function frame(now) {
+  const dt = Math.min(.05, (now - last) / 1000); last = now;
+  const t = now / 1000;
+  // точная позиция в такте на момент кадра
+  BT.pos = BT.idx + BT.phase + (Math.max(0, now - lastA) / 1000 + BT.lead) / BT.period;
+  A.beat = BT.kick * Math.exp(-(BT.pos - Math.floor(BT.pos)) * 5); // вспышка точно на ударе
+  updateChoreo(t, dt);
+  updBubbles(t, dt);
+  updHearts(t, dt);
+
+  drawWater(t);
+  for (const w of weeds) if (!w.front) drawWeed(w, t);
+  ctx.drawImage(sandCv, 0, 0, W, H);
+  for (const c of corals) drawCoral(c, t);
+  drawBubblers();
+  drawBubbles();
+  // рыбка, что дальше по вертикали, рисуется первой
+  // сначала маленькие (дальние) пары, главная — впереди
+  for (const P of [...PAIRS].sort((a, b) => a.scale - b.scale)) {
+    const fs = [P.fishA, P.fishB].sort((a, b) => a.y - b.y);
+    for (const f of fs) drawFish(f, baseS * P.scale);
+  }
+  drawHearts();
+  for (const w of weeds) if (w.front) drawWeed(w, t);
+  ctx.drawImage(glassCv, 0, 0, W, H);
+  if (A.beat > .01) { // блики на стекле вспыхивают в такт
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = A.beat * .5;
+    ctx.drawImage(glassCv, 0, 0, W, H); ctx.restore();
+  }
+  // индикатор такта
+  dotEl.style.transform = `scale(${1 + A.beat * .8})`;
+  dotEl.style.opacity = .4 + .6 * A.beat;
+  if (now - hudT > 250) {
+    hudT = now;
+    modeEl.textContent = (pair.musicOn ? '🎵 Играет музыка — целуются' : analyser ? '🔇 Музыки нет — подплывают и отплывают' : '🔇 Звук не подключён — подплывают и отплывают')
+      + ' · версия 16';
+    const bars = analyser ? Math.round((BT.meter || 0) * 8) : 0;
+    bpmEl.textContent = (analyser ? `🎤 ${'▮'.repeat(bars)}${'▯'.repeat(8 - bars)} · ` : '')
+      + `${Math.round(60 / BT.period)} BPM · сдвиг ${BT.lead >= 0 ? '+' : ''}${Math.round(BT.lead * 1000)} мс (← →)`;
+  }
+  requestAnimationFrame(frame);
+}
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
